@@ -1,53 +1,66 @@
 import logging
-import azure.functions as func
 import os
+
+import azure.functions as func
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
-from azure.mgmt.resource import ResourceManagementClient
 
 app = func.FunctionApp()
 
+credential = DefaultAzureCredential()
+
+
+def _get_display_status(vm_instance_view) -> str:
+    """PowerState を持つ status から displayStatus を取得する。"""
+    for status in vm_instance_view.statuses:
+        if status.code and status.code.startswith("PowerState/"):
+            return status.display_status
+    return "Unknown"
+
+
 @app.schedule(schedule="0 * * * * *", arg_name="myTimer", run_on_startup=True,
-              use_monitor=False) 
+              use_monitor=False)
 def timer_trigger(myTimer: func.TimerRequest) -> None:
     if myTimer.past_due:
         logging.info('The timer is past due!')
 
     logging.info('timer_trigger function start.')
 
-    # Acquire a credential object.
-    CREDENTIAL = DefaultAzureCredential()
+    subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID")
+    resource_group_name = os.environ.get("RESOURCE_GROUP_NAME")
+    vm_name = os.environ.get("VM_NAME")
 
-    # Retrieve subscription ID from environment variable.
-    SUBSCRIPTION_ID = os.environ["AZURE_SUBSCRIPTION_ID"]
-    if SUBSCRIPTION_ID is None:
-        logging.error("SUBSCRIPTION_ID is None")
-        exit(1)
-    RESOURCE_GROUP_NAME = os.environ["RESOURCE_GROUP_NAME"]
-    VM_NAME = os.environ["VM_NAME"]
-
-    # Obtain the management object for virtual machines
-    compute_client = ComputeManagementClient(
-        credential=CREDENTIAL, subscription_id=SUBSCRIPTION_ID
-    )
-
-    vm_result = compute_client.virtual_machines.instance_view(
-        resource_group_name=RESOURCE_GROUP_NAME,
-        vm_name=VM_NAME,
-    )
-    display_status = vm_result.serialize()["statuses"][1]["displayStatus"]
-
-    logging.info(
-        f"VM_NAME={VM_NAME}, RESOURCE_GROUP_NAME={RESOURCE_GROUP_NAME}, displayStatus={display_status}"
-    )
-
-    if display_status != "VM running":
-        # 'VM running' or 'VM deallocated'
-        vm_result = compute_client.virtual_machines.begin_start(
-            resource_group_name=RESOURCE_GROUP_NAME,
-            vm_name=VM_NAME,
+    if not subscription_id or not resource_group_name or not vm_name:
+        logging.error(
+            "Required environment variables are missing: "
+            "AZURE_SUBSCRIPTION_ID=%s, RESOURCE_GROUP_NAME=%s, VM_NAME=%s",
+            subscription_id, resource_group_name, vm_name,
         )
-        # 'InProgress' or 'Succeeded'
-        logging.info(f"begin_start={vm_result.status()}")
+        return
+
+    compute_client = ComputeManagementClient(
+        credential=credential, subscription_id=subscription_id
+    )
+
+    try:
+        vm_result = compute_client.virtual_machines.instance_view(
+            resource_group_name=resource_group_name,
+            vm_name=vm_name,
+        )
+        display_status = _get_display_status(vm_result)
+
+        logging.info(
+            "VM_NAME=%s, RESOURCE_GROUP_NAME=%s, displayStatus=%s",
+            vm_name, resource_group_name, display_status,
+        )
+
+        if display_status != "VM running":
+            poller = compute_client.virtual_machines.begin_start(
+                resource_group_name=resource_group_name,
+                vm_name=vm_name,
+            )
+            logging.info("begin_start=%s", poller.status())
+    except Exception:
+        logging.exception("Failed to check or start VM %s", vm_name)
 
     logging.info('timer_trigger function finish.')
