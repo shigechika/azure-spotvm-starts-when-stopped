@@ -12,10 +12,10 @@ Azure Spot VM はコスト効率に優れる一方、Azure の容量需要に応
 
 ## 前提条件
 
-- Python 3.9 以上
+- Python 3.13 以上（`azure-functions` 2.x の要件）
 - Azure サブスクリプション
 - [Azure Functions Core Tools](https://learn.microsoft.com/ja-jp/azure/azure-functions/functions-run-local) v4
-- [Azure CLI](https://learn.microsoft.com/ja-jp/cli/azure/install-azure-cli)
+- [Azure CLI](https://learn.microsoft.com/ja-jp/cli/azure/install-azure-cli) 2.60.0 以上（Flex Consumption プランの作成に必要。`az version` で確認）
 
 ## セットアップ
 
@@ -67,15 +67,22 @@ func start
 
 ### 1. Function App の作成
 
+Flex Consumption プランで作成します。従来の Linux Consumption プラン（`--consumption-plan-location`）は Python 3.12 までしか対応せず、2028-09-30 に廃止予定のため使いません（既存アプリの移行は後述）。
+
 ```bash
 az functionapp create \
   --resource-group <your-resource-group> \
-  --consumption-plan-location japaneast \
+  --flexconsumption-location japaneast \
   --runtime python \
-  --runtime-version 3.11 \
-  --functions-version 4 \
+  --runtime-version 3.13 \
   --name <your-function-app-name> \
   --storage-account <your-storage-account>
+```
+
+リージョンで使える Python のバージョンは次のコマンドで確認できます。
+
+```bash
+az functionapp list-flexconsumption-runtimes --location japaneast --runtime python --query '[].{version:version}' -o tsv
 ```
 
 ### 2. マネージド ID の有効化と権限付与
@@ -112,6 +119,20 @@ az functionapp config appsettings set \
 ```bash
 func azure functionapp publish <your-function-app-name>
 ```
+
+## 既存の Linux Consumption アプリからの移行
+
+以前の手順（`--consumption-plan-location`、Python 3.11）で作成したアプリは、`azure-functions` 2.x（Python 3.13 以上）を動かせません。プランをその場で切り替えることはできないので、Flex Consumption のアプリを新しく作って入れ替えます。
+
+1. 上の「Azure へのデプロイ」の 1〜4 を、新しいアプリ名で実行する（マネージド ID とロールの割り当て、アプリケーション設定も新しいアプリに対してやり直す）
+2. 新しいアプリのログで、VM の状態を毎分取得できていることを確認する
+3. 古いアプリを削除する（両方が動いている間は、同じ VM を二重に起動しようとする）
+
+```bash
+az functionapp delete --name <old-function-app-name> --resource-group <your-resource-group>
+```
+
+設定を自動で引き継ぐ `az functionapp flex-migration` もありますが、元のアプリの Python のバージョンを引き継ぐうえ、システム割り当てマネージド ID は引き継がれません。このアプリは設定が 3 つだけなので、作り直すほうが確実です。詳しくは [Migrate Consumption plan apps to the Flex Consumption plan](https://learn.microsoft.com/azure/azure-functions/migration/migrate-plan-consumption-to-flex) を参照してください。
 
 ## プロジェクト構成
 
