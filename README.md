@@ -15,7 +15,7 @@ Azure Spot VM はコスト効率に優れる一方、Azure の容量需要に応
 - Python 3.13 以上（`azure-functions` 2.x の要件）
 - Azure サブスクリプション
 - [Azure Functions Core Tools](https://learn.microsoft.com/ja-jp/azure/azure-functions/functions-run-local) v4
-- [Azure CLI](https://learn.microsoft.com/ja-jp/cli/azure/install-azure-cli)
+- [Azure CLI](https://learn.microsoft.com/ja-jp/cli/azure/install-azure-cli) 2.60.0 以上（Flex Consumption プランの作成に必要。`az version` で確認）
 
 ## セットアップ
 
